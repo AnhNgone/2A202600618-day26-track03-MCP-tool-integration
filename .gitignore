@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-.npm-cache/
-lab.db
+implementation/.npm-cache/
+implementation/lab.db
+.deepeval/
+/.mcp.json

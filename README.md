@@ -1,273 +1,181 @@
-# SQLite Lab MCP Server
+# Lab: Build a Database MCP Server with FastMCP and SQLite
 
-A [FastMCP](https://gofastmcp.com/) server that exposes a small `students` /
-`courses` / `enrollments` SQLite database through three MCP tools
-(`search`, `insert`, `aggregate`) and two MCP resources (full schema + a
-per-table schema template).
+## Goal
 
-## Project structure
+Build a Model Context Protocol (MCP) server using FastMCP that exposes a small database through:
+
+- `search`
+- `insert`
+- `aggregate`
+
+You must also expose the database schema as an MCP resource, test the server with Inspector or equivalent tooling, and show the server working from at least one MCP client.
+
+## Learning Outcomes
+
+By the end of this lab, students should be able to:
+
+- explain what MCP tools and resources are
+- build a FastMCP server in Python
+- connect FastMCP to a SQLite database
+- safely validate database requests before executing SQL
+- expose dynamic schema context through `@mcp.resource(...)`
+- test tool schemas, normal calls, and error responses
+- connect the server to an MCP client such as Claude Code, Codex, or Gemini CLI
+
+## Required Features
+
+### Part 1: MCP Server
+
+Implement a FastMCP server that exposes exactly these tool categories:
+
+1. `search`
+2. `insert`
+3. `aggregate`
+
+Your server may use SQLite for the main implementation. If you want to support PostgreSQL too, design the code so the database layer can be swapped later.
+
+### Part 2: Resource
+
+Expose database schema information as MCP resources:
+
+- one resource for the full database schema
+- one dynamic resource template for a single table schema
+
+Suggested URIs:
+
+- `schema://database`
+- `schema://table/{table_name}`
+
+### Part 3: Validation and Error Handling
+
+Your tools must reject unsafe or invalid requests:
+
+- unknown table names
+- unknown column names
+- unsupported filter operators
+- invalid aggregate requests
+- empty inserts
+
+Do not build SQL by blindly concatenating raw user input.
+
+### Part 4: Testing and Verification
+
+Verify all of the following:
+
+1. the server starts correctly
+2. the three tools are discoverable
+3. the schema resource is discoverable
+4. valid tool calls return useful results
+5. invalid tool calls return clear errors
+6. at least one MCP client can connect and use the server
+
+### Part 5: Demo Deliverables
+
+Prepare:
+
+- GitHub repository
+- setup instructions
+- tool descriptions
+- testing steps
+- at least one client configuration example
+- short demo video, around 2 minutes
+
+Inspector screenshots are recommended if you use MCP Inspector.
+
+## Suggested Project Structure
 
 ```text
 implementation/
-  db.py              # SQLiteAdapter: validated, parameterized DB access
-  init_db.py          # creates + seeds lab.db (reproducible)
-  mcp_server.py        # FastMCP server: tools + resources
-  verify_server.py     # scripted end-to-end verification (rubric checklist)
-  tests/test_server.py # pytest suite (adapter unit tests + MCP client tests)
-  requirements.txt
-  .mcp.json            # example Claude Code client config
-  start_inspector.sh / .ps1
+  db.py
+  init_db.py
+  mcp_server.py
+  verify_server.py
+  tests/
+    test_server.py
 ```
 
-## Data model
+## Recommended Data Model
 
-- `students(id, name, email, cohort, enrolled_on)`
-- `courses(id, title, department, credits)`
-- `enrollments(id, student_id, course_id, term, score)`
+Use a small relational dataset so `search`, `insert`, and `aggregate` are easy to demo. Example:
 
-## Setup
+- `students`
+- `courses`
+- `enrollments`
 
-```bash
-cd implementation
-python -m venv .venv        # optional but recommended
-pip install -r requirements.txt
-python init_db.py           # creates lab.db with schema + seed data
-```
+## Example Tasks to Demonstrate
 
-`init_db.py` is safe to re-run: it drops and recreates `lab.db` so the
-dataset is always reproducible.
+- search all students in cohort `A1`
+- insert a new student
+- count rows in a table
+- compute average score by cohort
+- read the full schema resource
+- read `schema://table/students`
+- show an invalid request, such as searching a missing table
 
-## Tools
+## FastMCP and Inspector References
 
-### `search(table, filters=None, columns=None, limit=20, offset=0, order_by=None, descending=False)`
+- FastMCP quickstart: https://gofastmcp.com/v2/getting-started/quickstart
+- FastMCP resources: https://gofastmcp.com/v2/servers/resources
+- MCP Inspector: https://modelcontextprotocol.io/docs/tools/inspector
 
-Filtered, paginated row lookup.
-
-- `filters`: `{"column": value}` for equality, or
-  `{"column": {"op": "=|!=|>|>=|<|<=|like|in", "value": ...}}` for other
-  operators.
-- Rejects unknown tables, unknown columns, and unsupported operators.
-
-Example: search all students in cohort `A1`
-
-```json
-{"table": "students", "filters": {"cohort": "A1"}}
-```
-
-### `insert(table, values)`
-
-Inserts one row (`values` is a `{"column": value}` object) and returns the
-inserted row including the generated primary key. Rejects empty payloads and
-unknown columns.
-
-Example: insert a new student
-
-```json
-{"table": "students", "values": {"name": "Nam Le", "email": "nam@example.com", "cohort": "A1", "enrolled_on": "2025-07-02"}}
-```
-
-### `aggregate(table, metric, column=None, filters=None, group_by=None)`
-
-Supports `count`, `avg`, `sum`, `min`, `max`, with optional `filters` and
-`group_by`. `count` may omit `column` (counts all rows); the other metrics
-require a valid numeric column.
-
-Example: average score by course
-
-```json
-{"table": "enrollments", "metric": "avg", "column": "score", "group_by": "course_id"}
-```
-
-## Resources
-
-- `schema://database` — JSON schema for every table.
-- `schema://table/{table_name}` — JSON schema for a single table (e.g.
-  `schema://table/students`); returns a clear error payload for an unknown
-  table name.
-
-## Validation and safety
-
-All SQL is built in `db.py` (`SQLiteAdapter`) using an allow-list approach:
-
-- table names are checked against `sqlite_master`
-- column names are checked against `PRAGMA table_info(table)`
-- filter operators are checked against a fixed `SUPPORTED_OPERATORS` map
-- aggregate metrics are checked against a fixed `SUPPORTED_METRICS` set
-- all values are passed as bound `?` parameters — never string-interpolated
-- empty inserts are rejected before any SQL is built
-
-Invalid requests raise `ValidationError`, which the MCP tool wrappers in
-`mcp_server.py` catch and turn into a `{"error": "..."}` payload instead of
-letting an exception or raw SQL error reach the client.
-
-## Testing and verification
-
-Run the automated test suite (adapter unit tests + end-to-end MCP client
-tests, each using an isolated temp database):
-
-```bash
-python -m pytest tests/test_server.py -v
-```
-
-Run the scripted verification walkthrough (tool discovery, resource
-discovery, valid calls, invalid calls with clear errors):
-
-```bash
-python verify_server.py
-```
-
-### Inspecting the server with the `fastmcp` CLI
-
-The lab's Goal section allows "Inspector or equivalent tooling" for manual
-verification. The `fastmcp` CLI (installed with `fastmcp`, no Node/npx
-required) covers the same checklist and is used here as the primary
-interactive verification tool:
-
-```bash
-# discover tools with their schemas
-fastmcp list mcp_server.py
-
-# summary of tools / resources / templates exposed
-fastmcp inspect mcp_server.py
-
-# valid call
-fastmcp call mcp_server.py search table=students --input-json '{"filters":{"cohort":"A1"}}' --json
-
-# invalid call -> clear error payload, not a crash
-fastmcp call mcp_server.py search table=not_a_table --json
-
-# read a resource
-fastmcp call mcp_server.py "schema://table/students" --json
-```
-
-> **Windows PowerShell note:** PowerShell 5.1 strips unescaped `"`
-> characters when passing arguments to a native executable, even inside a
-> single-quoted string — so the `--input-json` example above arrives as
-> invalid JSON (`{filters:{cohort:A1}}`) and `fastmcp` fails with
-> `Expecting property name enclosed in double quotes`. Escape the inner
-> quotes with `\"` instead:
->
-> ```powershell
-> fastmcp call mcp_server.py search table=students --input-json '{\"filters\":{\"cohort\":\"A1\"}}' --json
-> ```
-
-Checklist covered by the commands above:
-
-- `search`, `insert`, `aggregate` appear with schemas (`fastmcp list`)
-- `schema://database` and `schema://table/{table_name}` appear as resources
-  (`fastmcp inspect`)
-- a valid call (e.g. `search` on `students`) returns rows
-- an invalid call (e.g. `search` on a missing table) returns a clear error
-
-### MCP Inspector (optional)
-
-`start_inspector.sh` / `start_inspector.ps1` are also provided to launch the
-official [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector)
-web UI:
-
-```bash
-./start_inspector.sh        # macOS/Linux/WSL
-./start_inspector.ps1       # Windows PowerShell
-```
-
-> Note: on some Windows setups the Inspector's Node-based STDIO proxy can
-> time out on `initialize` even though the server itself starts and responds
-> correctly (verified independently via `fastmcp`/pytest above). If
-> Inspector doesn't connect on your machine, the `fastmcp` CLI commands
-> above are a fully equivalent substitute per the lab's own requirements.
-
-## Demo
-
-Screenshots covering the full rubric verification checklist — tool/resource
-discovery, valid and invalid tool calls, the automated test suite, the
-scripted verification walkthrough, and a live client connection.
-
-**Tool discovery** — `fastmcp inspect mcp_server.py --format fastmcp` shows
-the three tools (`search`, `insert`, `aggregate`) with their input schemas.
-
-![Tool discovery](screenshots/01-tool-discovery.png)
-
-**Resource discovery** — `schema://database` and the
-`schema://table/{table_name}` template are both exposed.
-
-![Resource discovery](screenshots/02-resource-discovery.png)
-
-**Valid call** — `search` returns students in cohort `A1`.
-
-![Valid search call](screenshots/03-valid-search-call.png)
-
-**Invalid call** — an unknown table/column/operator returns a clear
-`{"error": ...}` payload instead of crashing.
-
-![Invalid call error](screenshots/04-invalid-call-error.png)
-
-**Schema resource read** — `schema://table/students` returns the table's
-column definitions.
-
-![Schema resource read](screenshots/05-schema-resource-read.png)
-
-**Automated tests** — `pytest tests/test_server.py -v` passes all 18 tests
-(adapter unit tests + end-to-end MCP client tests).
-
-![pytest run](screenshots/06-pytest-run.png)
-
-**Scripted verification** — `python verify_server.py` walks through the full
-rubric checklist end-to-end and prints `All verification checks passed.`
-
-![Verify script](screenshots/07-verify-script.png)
-
-**Client connection** — a live MCP client (Claude Code) connected to
-`sqlite-lab` and running a real query.
-
-![Client connected](screenshots/08-client-connected.png)
-
-## Client configuration
+## Client Setup Notes
 
 ### Claude Code
 
-`.mcp.json` (included in this folder — update the paths for your machine):
+Anthropic documents local JSON config and `claude mcp add` flows here:
 
-```json
-{
-  "mcpServers": {
-    "sqlite-lab": {
-      "type": "stdio",
-      "command": "/ABSOLUTE/PATH/TO/python",
-      "args": ["/ABSOLUTE/PATH/TO/implementation/mcp_server.py"],
-      "env": {}
-    }
-  }
-}
-```
+- https://code.claude.com/docs/en/mcp
 
-Claude Code can also read resources directly, e.g.
-`@sqlite-lab:schema://database`.
+Claude Code supports MCP resources via `@server:resource-uri` references and supports environment variable expansion in `.mcp.json`.
+
+### Codex
+
+OpenAI documents Codex MCP setup here:
+
+- https://developers.openai.com/learn/docs-mcp
+
+Codex supports MCP server configuration through the CLI and `~/.codex/config.toml`.
 
 ### Gemini CLI
+
+Gemini CLI has a built-in MCP manager. In the verified local workflow, the simplest path is:
 
 ```bash
 gemini mcp add sqlite-lab /ABSOLUTE/PATH/TO/python /ABSOLUTE/PATH/TO/implementation/mcp_server.py --description "SQLite lab FastMCP server" --timeout 10000
 gemini mcp list
-gemini --allowed-mcp-server-names sqlite-lab --yolo -p "Use the sqlite-lab MCP server and show me the top 2 students by score."
 ```
 
-### Codex
+Gemini CLI also documents configuration details here:
 
-`~/.codex/config.toml`:
+- https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md
 
-```toml
-[mcp_servers.sqlite_lab]
-command = "/ABSOLUTE/PATH/TO/python"
-args = ["/ABSOLUTE/PATH/TO/implementation/mcp_server.py"]
-```
+Expected outcome:
 
-## Demo checklist
+- the server appears as `Connected`
+- Gemini can discover `search`, `insert`, and `aggregate`
+- a headless smoke test works with `gemini --allowed-mcp-server-names sqlite-lab --yolo -p "..."`
 
-1. `python init_db.py` — fresh database
-2. `python -m pytest tests/test_server.py -v` — all tests pass
-3. `python verify_server.py` — full checklist walkthrough with output
-4. `fastmcp list mcp_server.py` / `fastmcp inspect mcp_server.py` — show the
-   three tools + resources are discoverable; `fastmcp call` a valid and an
-   invalid request
-5. Connect one client (Claude Code / Gemini CLI / Codex) and run a live
-   query end-to-end (e.g. "search all students in cohort A1")
+### Antigravity
+
+Antigravity commonly uses an `mcp_config.json` file with a shape similar to Gemini CLI. Verify the current product behavior in your installed version before grading against exact UI steps.
+
+## Deliverable Checklist
+
+- working FastMCP server
+- SQLite database and seed data
+- `search`, `insert`, `aggregate` tools
+- schema resource and schema resource template
+- verification steps
+- automated tests or repeatable verification script
+- client configuration example
+- README with setup and demo steps
+- Inspector startup command or helper script
+- at least one verified Gemini CLI or Claude/Codex client test
+
+## Bonus
+
+Optional bonus:
+
+- add authentication for SSE or HTTP transport
+- support both SQLite and PostgreSQL with the same MCP surface
+- add richer output annotations or pagination
